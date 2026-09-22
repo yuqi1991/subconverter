@@ -12,7 +12,15 @@
 #include "utils/urlencode.h"
 #include "webserver.h"
 
-static const char *request_header_blacklist[] = {"host", "accept", "accept-encoding"};
+// Only forward headers that describe the subscription request itself. Browser
+// navigation and hop-by-hop headers can fingerprint the converter or leak
+// connection metadata to the remote provider.
+static const char *request_header_blacklist[] = {
+    "host", "accept", "accept-encoding", "accept-language", "cache-control",
+    "connection", "content-length", "dnt", "keep-alive", "origin", "pragma",
+    "referer", "te", "trailer", "transfer-encoding", "upgrade",
+    "upgrade-insecure-requests", "via"
+};
 
 static inline bool is_request_header_blacklisted(const std::string &header)
 {
@@ -23,7 +31,8 @@ static inline bool is_request_header_blacklisted(const std::string &header)
             return true;
         }
     }
-    return false;
+    return (header.size() >= 4 && strncasecmp(header.c_str(), "sec-", 4) == 0)
+        || (header.size() >= 6 && strncasecmp(header.c_str(), "proxy-", 6) == 0);
 }
 
 void WebServer::stop_web_server()

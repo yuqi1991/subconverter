@@ -101,7 +101,23 @@ int serveFile(WebServer *server, const std::string &filename, std::string &conte
     return 0;
 }
 
-const char *request_header_blacklist[] = {"host", "accept", "accept-encoding"};
+const char *request_header_blacklist[] = {
+    "host", "accept", "accept-encoding", "accept-language", "cache-control",
+    "connection", "content-length", "dnt", "keep-alive", "origin", "pragma",
+    "referer", "te", "trailer", "transfer-encoding", "upgrade",
+    "upgrade-insecure-requests", "via"
+};
+
+static inline bool is_request_header_blacklisted(const char *header)
+{
+    for (auto &x : request_header_blacklist)
+    {
+        if (strcasecmp(header, x) == 0)
+            return true;
+    }
+    return (strncasecmp(header, "sec-", 4) == 0)
+        || (strncasecmp(header, "proxy-", 6) == 0);
+}
 
 static inline void buffer_cleanup(struct evbuffer *eb)
 {
@@ -250,7 +266,7 @@ static void on_request(evhttp_request *req, void *args)
     struct evkeyval* kv = req->input_headers->tqh_first;
     while (kv)
     {
-        if(std::none_of(std::begin(request_header_blacklist), std::end(request_header_blacklist), [&](auto x){ return strcasecmp(kv->key, x) == 0; }))
+        if(!is_request_header_blacklisted(kv->key))
             request.headers.emplace(kv->key, kv->value);
         kv = kv->next.tqe_next;
     }

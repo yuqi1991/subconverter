@@ -4,3 +4,7 @@ cmake-build-debug
 .idea
 base/cache
 build
+CMakeCache.txt
+CMakeFiles/
+test_*.ini
+Dockerfile

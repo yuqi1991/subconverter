@@ -4,6 +4,7 @@
 #include <cmath>
 #include <climits>
 #include <cctype>
+#include <set>
 
 #include "config/regmatch.h"
 #include "generator/config/subexport.h"
@@ -227,6 +228,25 @@ void groupGenerate(const std::string &rule, std::vector<Proxy> &nodelist, string
                 filtered_nodelist.emplace_back(x.Remark);
         }
     }
+}
+
+static bool isBackupProxyGroup(const std::string &name)
+{
+    const std::string lowered = toLower(name);
+    return name.find("备用") != std::string::npos || lowered.find("backup") != std::string::npos;
+}
+
+static bool isSubscriptionNodeGroup(const ProxyGroupConfig &group)
+{
+    return std::any_of(group.Proxies.cbegin(), group.Proxies.cend(), [](const std::string &rule)
+    {
+        return startsWith(rule, "!!GROUPID=") || startsWith(rule, "!!INSERT=");
+    });
+}
+
+static bool isClashBuiltinPolicy(const std::string &name)
+{
+    return name == "DIRECT" || name == "REJECT" || name == "REJECT-DROP" || name == "PASS";
 }
 
 void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGroupConfigs &extra_proxy_group, bool clashR, extra_settings &ext)
@@ -558,6 +578,16 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
             if (x.HopInterval)
                 singleproxy["hop-interval"] = x.HopInterval;
             break;
+        case ProxyType::AnyTLS:
+            singleproxy["type"] = "anytls";
+            singleproxy["password"] = x.Password;
+            if(!x.SNI.empty())
+                singleproxy["sni"] = x.SNI;
+            if(!x.Alpn.empty())
+                singleproxy["alpn"] = x.Alpn;
+            if(!scv.is_undef())
+                singleproxy["skip-cert-verify"] = scv.get();
+            break;
         default:
             continue;
         }
@@ -594,6 +624,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         yamlnode["Proxy"] = proxies;
 
 
+    std::set<std::string> generated_group_names;
     for(const ProxyGroupConfig &x : extra_proxy_group)
     {
         YAML::Node singlegroup;
@@ -632,16 +663,26 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         if(!x.DisableUdp.is_undef())
             singlegroup["disable-udp"] = x.DisableUdp.get();
 
+        const bool add_direct = x.Type != ProxyGroupType::Fallback
+            && !isBackupProxyGroup(x.Name)
+            && !isSubscriptionNodeGroup(x);
         for(const auto& y : x.Proxies)
+        {
+            if(startsWith(y, "[]") && !isClashBuiltinPolicy(y.substr(2))
+                && generated_group_names.find(y.substr(2)) == generated_group_names.end())
+                continue;
             groupGenerate(y, nodelist, filtered_nodelist, true, ext);
+        }
 
         if(!x.UsingProvider.empty())
             singlegroup["use"] = x.UsingProvider;
         else
         {
-            if(filtered_nodelist.empty())
+            if(filtered_nodelist.empty() && add_direct)
                 filtered_nodelist.emplace_back("DIRECT");
         }
+        if(filtered_nodelist.empty() && x.UsingProvider.empty())
+            continue;
         if(!filtered_nodelist.empty())
             singlegroup["proxies"] = filtered_nodelist;
         if(group_block)
@@ -661,6 +702,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         }
         if(!replace_flag)
             original_groups.push_back(singlegroup);
+        generated_group_names.insert(x.Name);
     }
 
     if(group_compact)

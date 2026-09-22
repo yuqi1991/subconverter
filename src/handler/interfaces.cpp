@@ -328,12 +328,19 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         readConf();
 
     /// string values
-    std::string argUrl = getUrlArg(argument, "url");
+    std::string argUrl = getUrlArg(argument, "url"), argBackupUrl = getUrlArg(argument, "backup_url");
     std::string argGroupName = getUrlArg(argument, "group"), argUploadPath = getUrlArg(argument, "upload_path");
     std::string argIncludeRemark = getUrlArg(argument, "include"), argExcludeRemark = getUrlArg(argument, "exclude");
     std::string argCustomGroups = urlSafeBase64Decode(getUrlArg(argument, "groups")), argCustomRulesets = urlSafeBase64Decode(getUrlArg(argument, "ruleset")), argExternalConfig = getUrlArg(argument, "config");
     std::string argDeviceID = getUrlArg(argument, "dev_id"), argFilename = getUrlArg(argument, "filename"), argUpdateInterval = getUrlArg(argument, "interval"), argUpdateStrict = getUrlArg(argument, "strict");
     std::string argRenames = getUrlArg(argument, "rename"), argFilterScript = getUrlArg(argument, "filter_script");
+    std::string argCustomUserAgent = urlDecode(getUrlArg(argument, "diyua"));
+
+    if(argCustomUserAgent.find_first_of("\r\n") != std::string::npos)
+    {
+        *status_code = 400;
+        return "Invalid custom User-Agent.";
+    }
 
     /// switches with default value
     tribool argUpload = getUrlArg(argument, "upload"), argEmoji = getUrlArg(argument, "emoji"), argAddEmoji = getUrlArg(argument, "add_emoji"), argRemoveEmoji = getUrlArg(argument, "remove_emoji");
@@ -609,6 +616,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     parse_set.time_rules = &time_temp;
     parse_set.sub_info = &subInfo;
     parse_set.authorized = authorized;
+    if(!argCustomUserAgent.empty())
+        request.headers["User-Agent"] = argCustomUserAgent;
     parse_set.request_header = &request.headers;
     parse_set.js_runtime = ext.js_runtime;
     parse_set.js_context = ext.js_context;
@@ -641,13 +650,16 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     // Remove empty urls
     urls.erase(std::remove_if(urls.begin(), urls.end(), [](const std::string& str) { return str.empty(); }), urls.end());
     importItems(urls, true);
+    const bool groupedFailoverMode = !argBackupUrl.empty()
+        || argExternalConfig.find("Fallback_v2") != std::string::npos;
     groupID = 0;
     for(std::string &x : urls)
     {
         x = regTrim(x);
         //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
         writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
-        if(addNodes(x, nodes, groupID, parse_set) == -1)
+        const int nodeGroupID = groupedFailoverMode ? 0 : groupID;
+        if(addNodes(x, nodes, nodeGroupID, parse_set) == -1)
         {
             if(global.skipFailedLinks)
                 writeLog(0, "The following link doesn't contain any valid node info: " + x, LOG_LEVEL_WARNING);
@@ -657,7 +669,29 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
                 return "The following link doesn't contain any valid node info: " + x;
             }
         }
-        groupID++;
+        if(!groupedFailoverMode)
+            groupID++;
+    }
+    if(!argBackupUrl.empty())
+    {
+        urls = split(argBackupUrl, "|");
+        urls.erase(std::remove_if(urls.begin(), urls.end(), [](const std::string &str) { return str.empty(); }), urls.end());
+        importItems(urls, true);
+        for(std::string &x : urls)
+        {
+            x = regTrim(x);
+            writeLog(0, "Fetching backup node data from url '" + x + "'.", LOG_LEVEL_INFO);
+            if(addNodes(x, nodes, 1, parse_set) == -1)
+            {
+                if(global.skipFailedLinks)
+                    writeLog(0, "The following backup link doesn't contain any valid node info: " + x, LOG_LEVEL_WARNING);
+                else
+                {
+                    *status_code = 400;
+                    return "The following backup link doesn't contain any valid node info: " + x;
+                }
+            }
+        }
     }
     //exit if found nothing
     if(nodes.empty() && insert_nodes.empty())

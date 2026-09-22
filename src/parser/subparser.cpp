@@ -39,6 +39,14 @@ void commonConstruct(Proxy &node, ProxyType type, const std::string &group, cons
     node.TLS13 = tls13;
 }
 
+static void anytlsConstruct(Proxy &node, const std::string &group, const std::string &remarks, const std::string &server, const std::string &port, const std::string &password, const std::string &sni, const string_array &alpn, tribool udp, tribool tfo, tribool scv, const std::string &underlying_proxy)
+{
+    commonConstruct(node, ProxyType::AnyTLS, group, remarks, server, port, udp, tfo, scv, tribool(), underlying_proxy);
+    node.Password = password;
+    node.SNI = sni;
+    node.Alpn = alpn;
+}
+
 void vmessConstruct(Proxy &node, const std::string &group, const std::string &remarks, const std::string &add, const std::string &port, const std::string &type, const std::string &id, const std::string &aid, const std::string &net, const std::string &cipher, const std::string &path, const std::string &host, const std::string &edge, const std::string &tls, const std::string &sni, tribool udp, tribool tfo, tribool scv, tribool tls13, const std::string& underlying_proxy)
 {
     commonConstruct(node, ProxyType::VMess, group, remarks, add, port, udp, tfo, scv, tls13, underlying_proxy);
@@ -1102,6 +1110,7 @@ void explodeClash(Node yamlnode, std::vector<Proxy> &nodes)
     std::string ports, obfs_protocol, up, up_speed, down, down_speed, auth, auth_str,/* obfs, sni,*/ fingerprint, ca, ca_str, recv_window_conn, recv_window, disable_mtu_discovery, hop_interval, alpn; //hysteria
     std::string obfs_password, cwnd; //hysteria2
     string_array dns_server;
+    string_array anytls_alpn;
     tribool udp, tfo, scv;
     Node singleproxy;
     uint32_t index = nodes.size();
@@ -1117,6 +1126,8 @@ void explodeClash(Node yamlnode, std::vector<Proxy> &nodes)
         singleproxy["underlying-proxy"] >>= underlying_proxy;
         if(port.empty() || port == "0")
             continue;
+        alpn.clear();
+        anytls_alpn.clear();
         udp = safe_as<std::string>(singleproxy["udp"]);
         tfo = safe_as<std::string>(singleproxy["fast-open"]);
         scv = safe_as<std::string>(singleproxy["skip-cert-verify"]);
@@ -1165,6 +1176,14 @@ void explodeClash(Node yamlnode, std::vector<Proxy> &nodes)
             tls = safe_as<std::string>(singleproxy["tls"]) == "true" ? "tls" : "";
 
             vmessConstruct(node, group, ps, server, port, "", id, aid, net, cipher, path, host, edge, tls, sni, udp, tfo, scv, tribool(), underlying_proxy);
+            break;
+        case "anytls"_hash:
+            group = "AnyTLSProvider";
+            singleproxy["password"] >>= password;
+            singleproxy["sni"] >>= sni;
+            if(singleproxy["alpn"].IsDefined())
+                singleproxy["alpn"] >>= anytls_alpn;
+            anytlsConstruct(node, group, ps, server, port, password, sni, anytls_alpn, udp, tfo, scv, underlying_proxy);
             break;
         case "ss"_hash:
             group = SS_DEFAULT_GROUP;
