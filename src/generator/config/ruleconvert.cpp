@@ -578,6 +578,22 @@ static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Va
     rules | AppendToArray(realType.c_str(), rapidjson::Value(value.c_str(), value.size(), allocator), allocator);
 }
 
+// sing-box 1.14 deprecates the implicit default HTTP client used to download remote rule-sets (removed in 1.16)
+static void addSingBoxHttpClient(rapidjson::Document &base_rule, const std::string &detour, rapidjson::MemoryPoolAllocator<>& allocator)
+{
+    auto &route = base_rule["route"];
+    if (route.HasMember("default_http_client") || base_rule.HasMember("http_clients"))
+        return;
+
+    rapidjson::Value client(rapidjson::kObjectType);
+    client.AddMember("tag", "ruleset_http", allocator);
+    client.AddMember("detour", rapidjson::Value(detour.c_str(), allocator), allocator);
+    rapidjson::Value clients(rapidjson::kArrayType);
+    clients.PushBack(client, allocator);
+    base_rule.AddMember("http_clients", clients, allocator);
+    route.AddMember("default_http_client", "ruleset_http", allocator);
+}
+
 void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules)
 {
     using namespace rapidjson_ext;
@@ -668,4 +684,5 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
     | AddMemberOrReplace("rules", rules, allocator)
     | AddMemberOrReplace("final", finalValue, allocator);
     addSingBoxGeoRuleSets(base_rule, geo_tags, allocator);
+    addSingBoxHttpClient(base_rule, final.empty() ? "DIRECT" : final, allocator);
 }
