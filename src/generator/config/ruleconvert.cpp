@@ -470,6 +470,17 @@ void rulesetToSurge(INIReader &base_rule, std::vector<RulesetContent> &ruleset_c
     }
 }
 
+// sing-box 1.13 removed the block outbound; REJECT is expressed as a reject action
+template <typename T>
+static void addSingBoxRuleTarget(rapidjson::Value &rule_obj, const T &target, rapidjson::MemoryPoolAllocator<>& allocator)
+{
+    std::string name(target);
+    if (name == "REJECT" || name == "reject")
+        rule_obj.AddMember("action", "reject", allocator);
+    else
+        rule_obj.AddMember("outbound", rapidjson::Value(name.c_str(), allocator), allocator);
+}
+
 static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &args, const std::string& rule, const std::string &group, rapidjson::MemoryPoolAllocator<>& allocator)
 {
     args.clear();
@@ -486,12 +497,12 @@ static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &ar
     type = replaceAllDistinct(type, "src_", "source_");
     if (type == "match" || type == "final")
     {
-        rule_obj.AddMember("outbound", rapidjson::Value(value.data(), value.size(), allocator), allocator);
+        addSingBoxRuleTarget(rule_obj, value, allocator);
     }
     else
     {
         rule_obj.AddMember(rapidjson::Value(type.c_str(), allocator), rapidjson::Value(value.data(), value.size(), allocator), allocator);
-        rule_obj.AddMember("outbound", rapidjson::Value(group.c_str(), allocator), allocator);
+        addSingBoxRuleTarget(rule_obj, group, allocator);
     }
     return rule_obj;
 }
@@ -532,7 +543,9 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
             rules.Swap(base_rule["route"]["rules"]);
     }
 
-    auto dns_object = buildObject(allocator, "protocol", "dns", "outbound", "dns-out");
+    auto sniff_object = buildObject(allocator, "action", "sniff");
+    rules.PushBack(sniff_object, allocator);
+    auto dns_object = buildObject(allocator, "protocol", "dns", "action", "hijack-dns");
     rules.PushBack(dns_object, allocator);
 
     if (global.singBoxAddClashModes)
@@ -592,7 +605,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
             appendSingBoxRule(temp, rule, strLine, allocator);
         }
         if (rule.ObjectEmpty()) continue;
-        rule.AddMember("outbound", rapidjson::Value(rule_group.c_str(), allocator), allocator);
+        addSingBoxRuleTarget(rule, rule_group, allocator);
         rules.PushBack(rule, allocator);
     }
 

@@ -2331,10 +2331,6 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
     {
         auto direct = buildObject(allocator, "type", "direct", "tag", "DIRECT");
         outbounds.PushBack(direct, allocator);
-        auto reject = buildObject(allocator, "type", "block", "tag", "REJECT");
-        outbounds.PushBack(reject, allocator);
-        auto dns = buildObject(allocator, "type", "dns", "tag", "dns-out");
-        outbounds.PushBack(dns, allocator);
     }
 
     for (Proxy &x : nodes)
@@ -2596,6 +2592,9 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
         }
         for (const auto &y : x.Proxies)
             groupGenerate(y, nodelist, filtered_nodelist, true, ext);
+
+        // sing-box 1.13 removed the block outbound, so REJECT can't be a group member
+        filtered_nodelist.erase(std::remove(filtered_nodelist.begin(), filtered_nodelist.end(), "REJECT"), filtered_nodelist.end());
 
         if (filtered_nodelist.empty())
             filtered_nodelist.emplace_back("DIRECT");
