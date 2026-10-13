@@ -2520,6 +2520,26 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
                 proxy.AddMember("tls", tls, allocator);
                 break;
             }
+            case ProxyType::AnyTLS:
+            {
+                addSingBoxCommonMembers(proxy, x, "anytls", allocator);
+                proxy.AddMember("password", rapidjson::StringRef(x.Password.c_str()), allocator);
+                rapidjson::Value tls(rapidjson::kObjectType);
+                tls.AddMember("enabled", true, allocator);
+                if (!x.SNI.empty())
+                    tls.AddMember("server_name", rapidjson::StringRef(x.SNI.c_str()), allocator);
+                if (!scv.is_undef())
+                    tls.AddMember("insecure", scv.get(), allocator);
+                if (!x.Alpn.empty())
+                {
+                    rapidjson::Value alpn(rapidjson::kArrayType);
+                    for (const auto &a : x.Alpn)
+                        alpn.PushBack(rapidjson::Value(a.c_str(), allocator), allocator);
+                    tls.AddMember("alpn", alpn, allocator);
+                }
+                proxy.AddMember("tls", tls, allocator);
+                break;
+            }
             case ProxyType::HTTP:
             case ProxyType::HTTPS:
             {
