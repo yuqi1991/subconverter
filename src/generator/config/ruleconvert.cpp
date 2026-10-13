@@ -136,7 +136,6 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_
         rules = base_rule[field_name];
 
     std::vector<std::string_view> temp(4);
-    std::set<std::string> geo_tags;
     for(RulesetContent &x : ruleset_content_array)
     {
         if(global.maxAllowedRules && total_rules > global.maxAllowedRules)
@@ -608,6 +607,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
     }
 
     std::vector<std::string_view> temp(4);
+    std::set<std::string> geo_tags;
     for(RulesetContent &x : ruleset_content_array)
     {
         if(global.maxAllowedRules && total_rules > global.maxAllowedRules)
