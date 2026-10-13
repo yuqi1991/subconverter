@@ -321,8 +321,7 @@ enhanced-mode-by-rule = true
                 "server": "dns_proxy"
             }
         ],
-        "final": "dns_direct",
-        "independent_cache": true
+        "final": "dns_direct"
     },
     "ntp": {
         "enabled": true,
