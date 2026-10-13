@@ -350,8 +350,7 @@ enhanced-mode-by-rule = true
             "address": ["172.19.0.1/30"],
             {% endif %}
             "auto_route": true,
-            "strict_route": true,
-            "stack": "mixed"
+            "strict_route": true
         }
     ],
     "outbounds": [],
