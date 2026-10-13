@@ -1,3 +1,4 @@
+#include <set>
 #include <string>
 
 #include "handler/settings.h"
@@ -15,7 +16,7 @@ string_array Surge2RuleTypes = {basic_types, "IP-CIDR6", "USER-AGENT", "URL-REGE
 string_array SurgeRuleTypes = {basic_types, "IP-CIDR6", "USER-AGENT", "URL-REGEX", "AND", "OR", "NOT", "PROCESS-NAME", "IN-PORT", "DEST-PORT", "SRC-IP"};
 string_array QuanXRuleTypes = {basic_types, "USER-AGENT", "HOST", "HOST-SUFFIX", "HOST-KEYWORD"};
 string_array SurfRuleTypes = {basic_types, "IP-CIDR6", "PROCESS-NAME", "IN-PORT", "DEST-PORT", "SRC-IP"};
-string_array SingBoxRuleTypes = {basic_types, "IP-VERSION", "INBOUND", "PROTOCOL", "NETWORK", "GEOSITE", "SRC-GEOIP", "DOMAIN-REGEX", "PROCESS-NAME", "PROCESS-PATH", "PACKAGE-NAME", "PORT", "PORT-RANGE", "SRC-PORT", "SRC-PORT-RANGE", "USER", "USER-ID"};
+string_array SingBoxRuleTypes = {basic_types, "IP-VERSION", "INBOUND", "PROTOCOL", "NETWORK", "GEOSITE", "DOMAIN-REGEX", "PROCESS-NAME", "PROCESS-PATH", "PACKAGE-NAME", "PORT", "PORT-RANGE", "SRC-PORT", "SRC-PORT-RANGE", "USER", "USER-ID"};
 
 std::string convertRuleset(const std::string &content, int type)
 {
@@ -135,6 +136,7 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_
         rules = base_rule[field_name];
 
     std::vector<std::string_view> temp(4);
+    std::set<std::string> geo_tags;
     for(RulesetContent &x : ruleset_content_array)
     {
         if(global.maxAllowedRules && total_rules > global.maxAllowedRules)
@@ -481,7 +483,42 @@ static void addSingBoxRuleTarget(rapidjson::Value &rule_obj, const T &target, ra
         rule_obj.AddMember("outbound", rapidjson::Value(name.c_str(), allocator), allocator);
 }
 
-static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &args, const std::string& rule, const std::string &group, rapidjson::MemoryPoolAllocator<>& allocator)
+// sing-box 1.12 removed the geoip/geosite databases, they are referenced as remote rule sets instead
+static bool singBoxGeoRuleSet(const std::string &type, const std::string &value, std::string &tag)
+{
+    if (type != "geoip" && type != "geosite")
+        return false;
+    tag = type + "-" + value;
+    return true;
+}
+
+static void addSingBoxGeoRuleSets(rapidjson::Document &base_rule, const std::set<std::string> &tags, rapidjson::MemoryPoolAllocator<>& allocator)
+{
+    if (tags.empty())
+        return;
+    if (!base_rule["route"].HasMember("rule_set") || !base_rule["route"]["rule_set"].IsArray())
+        base_rule["route"].AddMember("rule_set", rapidjson::Value(rapidjson::kArrayType), allocator);
+    auto &rule_sets = base_rule["route"]["rule_set"];
+    for (const auto &tag : tags)
+    {
+        bool exist = false;
+        for (auto &x : rule_sets.GetArray())
+            if (x.HasMember("tag") && tag == x["tag"].GetString())
+                exist = true;
+        if (exist)
+            continue;
+        bool is_ip = startsWith(tag, "geoip-");
+        std::string url = std::string("https://raw.githubusercontent.com/SagerNet/") + (is_ip ? "sing-geoip" : "sing-geosite") + "/rule-set/" + tag + ".srs";
+        rapidjson::Value rs(rapidjson::kObjectType);
+        rs.AddMember("tag", rapidjson::Value(tag.c_str(), allocator), allocator);
+        rs.AddMember("type", "remote", allocator);
+        rs.AddMember("format", "binary", allocator);
+        rs.AddMember("url", rapidjson::Value(url.c_str(), allocator), allocator);
+        rule_sets.PushBack(rs, allocator);
+    }
+}
+
+static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &args, const std::string& rule, const std::string &group, std::set<std::string> &geo_tags, rapidjson::MemoryPoolAllocator<>& allocator)
 {
     args.clear();
     split(args, rule, ',');
@@ -501,13 +538,20 @@ static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &ar
     }
     else
     {
-        rule_obj.AddMember(rapidjson::Value(type.c_str(), allocator), rapidjson::Value(value.data(), value.size(), allocator), allocator);
+        std::string geo_tag;
+        if (singBoxGeoRuleSet(type, value, geo_tag))
+        {
+            geo_tags.insert(geo_tag);
+            rule_obj.AddMember("rule_set", rapidjson::Value(geo_tag.c_str(), allocator), allocator);
+        }
+        else
+            rule_obj.AddMember(rapidjson::Value(type.c_str(), allocator), rapidjson::Value(value.data(), value.size(), allocator), allocator);
         addSingBoxRuleTarget(rule_obj, group, allocator);
     }
     return rule_obj;
 }
 
-static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Value &rules, const std::string& rule, rapidjson::MemoryPoolAllocator<>& allocator)
+static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Value &rules, const std::string& rule, std::set<std::string> &geo_tags, rapidjson::MemoryPoolAllocator<>& allocator)
 {
     using namespace rapidjson_ext;
     args.clear();
@@ -525,6 +569,13 @@ static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Va
     realType = replaceAllDistinct(realType, "-", "_");
     realType = replaceAllDistinct(realType, "ip_cidr6", "ip_cidr");
 
+    std::string geo_tag;
+    if (singBoxGeoRuleSet(realType, value, geo_tag))
+    {
+        geo_tags.insert(geo_tag);
+        rules | AppendToArray("rule_set", rapidjson::Value(geo_tag.c_str(), allocator), allocator);
+        return;
+    }
     rules | AppendToArray(realType.c_str(), rapidjson::Value(value.c_str(), value.size(), allocator), allocator);
 }
 
@@ -576,7 +627,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
                 final = rule_group;
                 continue;
             }
-            rules.PushBack(transformRuleToSingBox(temp, strLine, rule_group, allocator), allocator);
+            rules.PushBack(transformRuleToSingBox(temp, strLine, rule_group, geo_tags, allocator), allocator);
             total_rules++;
             continue;
         }
@@ -602,7 +653,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
                 strLine.erase(strLine.find("//"));
                 strLine = trimWhitespace(strLine);
             }
-            appendSingBoxRule(temp, rule, strLine, allocator);
+            appendSingBoxRule(temp, rule, strLine, geo_tags, allocator);
         }
         if (rule.ObjectEmpty()) continue;
         addSingBoxRuleTarget(rule, rule_group, allocator);
@@ -616,4 +667,5 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
     base_rule["route"]
     | AddMemberOrReplace("rules", rules, allocator)
     | AddMemberOrReplace("final", finalValue, allocator);
+    addSingBoxGeoRuleSets(base_rule, geo_tags, allocator);
 }
